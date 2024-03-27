@@ -47,8 +47,10 @@ func (app *App) Initialize(user, password, dbname string) {
 
 func (app *App) setRouters() {
 	app.Get("/records", app.getRecords)
+	app.Get("/records/{id}", app.getRecord)
 	app.Post("/records", app.createRecord)
 	app.Put("/records/{id}", app.updateRecord)
+	app.Delete("/records/{id}", app.deleteRecord)
 }
 
 func (app *App) Get(path string, handler func(writer http.ResponseWriter, request *http.Request)) {
@@ -61,6 +63,10 @@ func (app *App) Post(path string, handler func(writer http.ResponseWriter, reque
 
 func (app *App) Put(path string, handler func(writer http.ResponseWriter, request *http.Request)) {
 	app.Router.HandleFunc(path, handler).Methods("PUT")
+}
+
+func (app *App) Delete(path string, handler func(writer http.ResponseWriter, request *http.Request)) {
+	app.Router.HandleFunc(path, handler).Methods("DELETE")
 }
 
 func (app *App) getRecords(writer http.ResponseWriter, request *http.Request) {
@@ -116,7 +122,7 @@ func (app *App) updateRecord(writer http.ResponseWriter, request *http.Request) 
 
 	id, err := strconv.Atoi(mux.Vars(request)["id"])
 	if err != nil {
-		respondWithJSON(writer, http.StatusBadRequest, responseJson{ "message": err.Error() })
+		respondWithJSON(writer, http.StatusBadRequest, responseJson{ "message": "'id' must be of type int" })
 		return
 	}
 
@@ -137,6 +143,62 @@ func (app *App) updateRecord(writer http.ResponseWriter, request *http.Request) 
 	}
 
 	respondWithJSON(writer, http.StatusOK, responseJson{ "message": "Record successfully updated." })
+}
+
+func (app *App) getRecord(writer http.ResponseWriter, request * http.Request) {
+	var record RecordsRow
+
+	id, err := strconv.Atoi(mux.Vars(request)["id"])
+	if err != nil {
+		respondWithJSON(writer, http.StatusBadRequest, responseJson{ "message": "'id' must be of type int" })
+		return
+	}
+
+	rows, err := app.DB.Query("SELECT * FROM records WHERE id = $1", id)
+	if err != nil {
+		respondWithJSON(writer, http.StatusInternalServerError, responseJson{ "message": err.Error() })
+		return
+	}
+	defer rows.Close()
+
+	if rows.Next() {
+		if err := rows.Scan(&record.Id, &record.Text, &record.CreatedAt, &record.UpdatedAt); err != nil {
+			respondWithJSON(writer, http.StatusInternalServerError, responseJson{ "message": err.Error() })
+			return
+		}
+	} else {
+		respondWithJSON(writer, http.StatusBadRequest, responseJson{ "message": fmt.Sprintf("record with id %d does not exist!", id) })
+		return
+	}
+
+	respondWithJSON(writer, http.StatusOK, record)
+}
+
+func (app *App) deleteRecord(writer http.ResponseWriter, request *http.Request) {
+	id, err := strconv.Atoi(mux.Vars(request)["id"])
+	if err != nil {
+		respondWithJSON(writer, http.StatusBadRequest, responseJson{ "message": "'id' must be of type int" })
+		return
+	}
+
+	result, err := app.DB.Exec("DELETE FROM records WHERE id = $1", id)
+	if err != nil {
+		respondWithJSON(writer, http.StatusInternalServerError, responseJson{ "message": err.Error() })
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		respondWithJSON(writer, http.StatusInternalServerError, responseJson{ "message": err.Error() })
+		return
+	}
+
+	if rowsAffected == 0 {
+		respondWithJSON(writer, http.StatusBadRequest, responseJson{ "message": fmt.Sprintf("record with id %d does not exist!", id) })
+		return
+	}
+
+	respondWithJSON(writer, http.StatusOK, responseJson{ "message": "record deleted successfully." })
 }
 
 func respondWithJSON(writer http.ResponseWriter, statusCode int, payload interface{}) {
