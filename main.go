@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -19,19 +20,17 @@ type App struct {
 }
 
 type RecordsRow struct {
-	Id int
-	Text string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	Id int `json:"id"`
+	Text string `json:"text"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
-type CreateRecordBody struct {
+type RecordBody struct {
 	Text string
 }
 
-type ResponseMessage struct {
-	Message string `json:"message"`
-}
+type responseJson map[string]string
 
 func (app *App) Initialize(user, password, dbname string) {
 	connectionStr := fmt.Sprintf("user=%s password=%s dbname=%s sslmode=disable", user, password, dbname)
@@ -49,6 +48,7 @@ func (app *App) Initialize(user, password, dbname string) {
 func (app *App) setRouters() {
 	app.Get("/records", app.getRecords)
 	app.Post("/records", app.createRecord)
+	app.Put("/records/{id}", app.updateRecord)
 }
 
 func (app *App) Get(path string, handler func(writer http.ResponseWriter, request *http.Request)) {
@@ -59,10 +59,16 @@ func (app *App) Post(path string, handler func(writer http.ResponseWriter, reque
 	app.Router.HandleFunc(path, handler).Methods("POST")
 }
 
+func (app *App) Put(path string, handler func(writer http.ResponseWriter, request *http.Request)) {
+	app.Router.HandleFunc(path, handler).Methods("PUT")
+}
+
 func (app *App) getRecords(writer http.ResponseWriter, request *http.Request) {
+	var records []RecordsRow
+
 	rows, err := app.DB.Query("SELECT * FROM records")
 	if err != nil {
-		http.Error(writer, err.Error(), http.StatusInternalServerError)
+		respondWithJSON(writer, http.StatusInternalServerError, responseJson{ "message": err.Error() })
 		return
 	}
 	defer rows.Close()
@@ -70,35 +76,67 @@ func (app *App) getRecords(writer http.ResponseWriter, request *http.Request) {
 	for rows.Next() {
 		var row RecordsRow
 		if err := rows.Scan(&row.Id, &row.Text, &row.CreatedAt, &row.UpdatedAt); err != nil {
-			http.Error(writer, err.Error(), http.StatusInternalServerError)
+			respondWithJSON(writer, http.StatusInternalServerError, responseJson{ "message": err.Error() })
 			return
 		}
-		fmt.Fprintf(writer, "%d | %s | %v | %v\n", row.Id, row.Text, row.CreatedAt, row.UpdatedAt)
+		records = append(records, row)
 	}
 
 	if err = rows.Err(); err != nil {
-		http.Error(writer, err.Error(), http.StatusInternalServerError)
+		respondWithJSON(writer, http.StatusInternalServerError, responseJson{ "message": err.Error() })
+		return
 	}
+
+	respondWithJSON(writer, http.StatusOK, records)
 }
 
 func (app *App) createRecord(writer http.ResponseWriter, request *http.Request) {
-	var requestBody CreateRecordBody
+	var requestBody RecordBody
 	if err := json.NewDecoder(request.Body).Decode(&requestBody); err != nil {
-		http.Error(writer, err.Error(), http.StatusBadRequest)
+		respondWithJSON(writer, http.StatusBadRequest, responseJson{ "message": err.Error() })
+		return
 	}
 
 	if requestBody.Text == "" {
-		respondWithJSON(writer, http.StatusBadRequest, ResponseMessage{ Message: "'text' field is required!" })
+		respondWithJSON(writer, http.StatusBadRequest, responseJson{ "message": "'text' field is required!" })
 		return
 	}
 
 	_, err := app.DB.Exec("INSERT INTO records (text) VALUES ($1)", requestBody.Text)
 	if err != nil {
-		http.Error(writer, err.Error(), http.StatusInternalServerError)
+		respondWithJSON(writer, http.StatusInternalServerError, responseJson{ "error": err.Error() })
 		return
 	}
 
-	respondWithJSON(writer, http.StatusOK, ResponseMessage{ Message: "Record successfully added." })
+	respondWithJSON(writer, http.StatusOK, map[string]string{ "message": "Record successfully added." })
+}
+
+func (app *App) updateRecord(writer http.ResponseWriter, request *http.Request) {
+	var requestBody RecordBody
+
+	id, err := strconv.Atoi(mux.Vars(request)["id"])
+	if err != nil {
+		respondWithJSON(writer, http.StatusBadRequest, responseJson{ "message": err.Error() })
+		return
+	}
+
+	if err := json.NewDecoder(request.Body).Decode(&requestBody); err != nil {
+		respondWithJSON(writer, http.StatusBadRequest, responseJson{ "message": err.Error() })
+		return
+	}
+
+	if requestBody.Text == "" {
+		respondWithJSON(writer, http.StatusBadRequest, responseJson{ "message": "'text' field is required" })
+		return
+	}
+
+	_, err = app.DB.Exec("UPDATE records SET text = $1, updatedat = NOW() WHERE id = $2", requestBody.Text, id)
+	if err != nil {
+		respondWithJSON(writer, http.StatusInternalServerError, responseJson{ "message": err.Error() })
+		return
+	}
+
+	respondWithJSON(writer, http.StatusOK, responseJson{ "message": "Record successfully updated." })
 }
 
 func respondWithJSON(writer http.ResponseWriter, statusCode int, payload interface{}) {
