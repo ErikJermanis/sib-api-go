@@ -117,6 +117,7 @@ func (app *App) authenticate(writer http.ResponseWriter, request *http.Request) 
 		respondWithJSON(writer, http.StatusBadRequest, responseJson{ "message": err.Error() })
 		return
 	}
+	defer request.Body.Close()
 
 	if requestBody.Otp == "" {
 		respondWithJSON(writer, http.StatusBadRequest, responseJson{ "message": "'otp' field is required" })
@@ -124,23 +125,12 @@ func (app *App) authenticate(writer http.ResponseWriter, request *http.Request) 
 	}
 	var used bool;
 	var expiresAt time.Time
+	// TODO: add bcrypt here
 	err := app.DB.QueryRow("SELECT used, expiresat FROM otps WHERE otp = $1", requestBody.Otp).Scan(&used, &expiresAt)
 	if err != nil || used || time.Now().After(expiresAt) {
 		respondWithJSON(writer, http.StatusUnauthorized, responseJson{ "message": "Access denied." })
 		return
 	}
-	// if err != nil {
-	// 	respondWithJSON(writer, http.StatusUnauthorized, responseJson{ "message": "Access denied, row not found." })
-	// 	return
-	// }
-	// if used {
-	// 	respondWithJSON(writer, http.StatusUnauthorized, responseJson{ "message": "Access denied, already used." })
-	// 	return
-	// }
-	// if time.Now().After(expiresAt) {
-	// 	respondWithJSON(writer, http.StatusUnauthorized, responseJson{ "message": "Access denied, expired" })
-	// 	return
-	// }
 	
 	_, err = app.DB.Exec("UPDATE otps SET used = true WHERE otp = $1", requestBody.Otp)
 	if err != nil {
@@ -190,6 +180,7 @@ func (app *App) createRecord(writer http.ResponseWriter, request *http.Request) 
 		respondWithJSON(writer, http.StatusBadRequest, responseJson{ "message": err.Error() })
 		return
 	}
+	defer request.Body.Close()
 
 	if requestBody.Text == "" {
 		respondWithJSON(writer, http.StatusBadRequest, responseJson{ "message": "'text' field is required!" })
@@ -218,6 +209,7 @@ func (app *App) updateRecord(writer http.ResponseWriter, request *http.Request) 
 		respondWithJSON(writer, http.StatusBadRequest, responseJson{ "message": err.Error() })
 		return
 	}
+	defer request.Body.Close()
 
 	if requestBody.Text == "" {
 		respondWithJSON(writer, http.StatusBadRequest, responseJson{ "message": "'text' field is required" })
@@ -318,12 +310,12 @@ func (app *App) Run(port string) {
 
 func main() {
 	app := &App{}
-	app.Initialize("erik", "erik", "sib")
+	app.Initialize("erik", os.Getenv("SIB_API_DB_PASS"), "sib")
 	channel := make(chan os.Signal, 1)
 	signal.Notify(channel, os.Interrupt)
 	go func() {
 		<-channel
-		fmt.Println("WHY THE FUCK WOULD YOU DO THAT?!!")
+		fmt.Println("\nBye!")
 		os.Exit(0)
 	}()
 	app.Run(":8080")
