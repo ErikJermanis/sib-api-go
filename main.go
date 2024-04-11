@@ -52,12 +52,13 @@ func (app *App) Initialize(user, password, dbname string) {
 }
 
 func (app *App) setRouters() {
-	app.Post("/authenticate", app.authenticate)
-	app.Get("/records", app.protected(app.getRecords))
-	app.Get("/records/{id}", app.protected(app.getRecord))
-	app.Post("/records", app.protected(app.createRecord))
-	app.Put("/records/{id}", app.protected(app.updateRecord))
-	app.Delete("/records/{id}", app.protected(app.deleteRecord))
+	app.Post("/authenticate", app.withCORS(app.authenticate))
+	app.Get("/is-authenticated", app.withCORS(app.isAuthenticated))
+	app.Get("/records", app.withCORS(app.protected(app.getRecords)))
+	app.Get("/records/{id}", app.withCORS(app.protected(app.getRecord)))
+	app.Post("/records", app.withCORS(app.protected(app.createRecord)))
+	app.Put("/records/{id}", app.withCORS(app.protected(app.updateRecord)))
+	app.Delete("/records/{id}", app.withCORS(app.protected(app.deleteRecord)))
 }
 
 func (app *App) Get(path string, handler func(writer http.ResponseWriter, request *http.Request)) {
@@ -111,6 +112,13 @@ func (app *App) protected(handler http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+func (app *App) withCORS(handler http.HandlerFunc) http.HandlerFunc {
+	return func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Access-Control-Allow-Origin", "*")
+		handler.ServeHTTP(writer, request)
+	}
+}
+
 func (app *App) authenticate(writer http.ResponseWriter, request *http.Request) {
 	var requestBody AuthenticateBody;
 	if err := json.NewDecoder(request.Body).Decode(&requestBody); err != nil {
@@ -145,6 +153,39 @@ func (app *App) authenticate(writer http.ResponseWriter, request *http.Request) 
 	}
 
 	respondWithJSON(writer, http.StatusOK, responseJson{ "token": token })
+}
+
+func (app *App) isAuthenticated(writer http.ResponseWriter, request *http.Request) {
+	authHeader := request.Header.Get("Authorization")
+	if authHeader == "" {
+		respondWithJSON(writer, http.StatusUnauthorized, responseJson{ "message": "Access denied." })
+		return
+	}
+	
+	bearerToken := strings.Split(authHeader, " ")
+	if len(bearerToken) != 2 {
+		respondWithJSON(writer, http.StatusUnauthorized, responseJson{ "message": "Access denied." })
+		return
+	}
+
+	token, err := jwt.Parse(bearerToken[1], func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return []byte(os.Getenv("SIB_API_JWT_SECRET")), nil
+	})
+
+	if err != nil {
+		respondWithJSON(writer, http.StatusUnauthorized, responseJson{ "message": "Access denied." })
+		return
+	}
+
+	if _, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+		respondWithJSON(writer, http.StatusOK, responseJson{ "authenticated": "true" })
+	} else {
+		respondWithJSON(writer, http.StatusUnauthorized, responseJson{ "message": "Access denied." })
+		return
+	}
 }
 
 func (app *App) getRecords(writer http.ResponseWriter, request *http.Request) {
