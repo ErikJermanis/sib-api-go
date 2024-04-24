@@ -135,20 +135,8 @@ func (app *App) authenticate(writer http.ResponseWriter, request *http.Request) 
 	var expiresAt time.Time
 	// TODO: add bcrypt here
 	err := app.DB.QueryRow("SELECT used, expiresat FROM otps WHERE otp = $1", requestBody.Otp).Scan(&used, &expiresAt)
-	// if err != nil || used || time.Now().After(expiresAt) {
-	// 	respondWithJSON(writer, http.StatusUnauthorized, responseJson{ "message": "Access denied." })
-	// 	return
-	// }
-	if err != nil {
-		respondWithJSON(writer, http.StatusUnauthorized, responseJson{ "message": fmt.Sprintf("trying pass %v", os.Getenv("SIB_API_DB_PASS")) })
-		return
-	}
-	if used {
-		respondWithJSON(writer, http.StatusUnauthorized, responseJson{ "message": "Used" })
-		return
-	}
-	if time.Now().After(expiresAt) {
-		respondWithJSON(writer, http.StatusUnauthorized, responseJson{ "message": "Expired" })
+	if err != nil || used || time.Now().After(expiresAt) {
+		respondWithJSON(writer, http.StatusUnauthorized, responseJson{ "message": "Access denied." })
 		return
 	}
 	
