@@ -140,7 +140,7 @@ func (app *App) authenticate(writer http.ResponseWriter, request *http.Request) 
 	// 	return
 	// }
 	if err != nil {
-		respondWithJSON(writer, http.StatusUnauthorized, responseJson{ "message": err.Error() })
+		respondWithJSON(writer, http.StatusUnauthorized, responseJson{ "message": fmt.Sprintf("trying pass %v", os.Getenv("SIB_API_DB_PASS")) })
 		return
 	}
 	if used {
