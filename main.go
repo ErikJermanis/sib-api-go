@@ -140,7 +140,7 @@ func (app *App) authenticate(writer http.ResponseWriter, request *http.Request) 
 	// 	return
 	// }
 	if err != nil {
-		respondWithJSON(writer, http.StatusUnauthorized, responseJson{ "message": "Err not nil." })
+		respondWithJSON(writer, http.StatusUnauthorized, responseJson{ "message": err.Error() })
 		return
 	}
 	if used {
