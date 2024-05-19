@@ -26,10 +26,16 @@ type RecordsRow struct {
 	Text string `json:"text"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
+	Completed bool `json:"completed"`
 }
 
-type RecordBody struct {
+type CreateRecordBody struct {
 	Text string
+}
+
+type UpdateRecordBody struct {
+	Text string
+	Completed bool
 }
 
 type AuthenticateBody struct {
@@ -200,7 +206,7 @@ func (app *App) getRecords(writer http.ResponseWriter, request *http.Request) {
 
 	for rows.Next() {
 		var row RecordsRow
-		if err := rows.Scan(&row.Id, &row.Text, &row.CreatedAt, &row.UpdatedAt); err != nil {
+		if err := rows.Scan(&row.Id, &row.Text, &row.CreatedAt, &row.UpdatedAt, &row.Completed); err != nil {
 			respondWithJSON(writer, http.StatusInternalServerError, responseJson{ "message": err.Error() })
 			return
 		}
@@ -216,7 +222,8 @@ func (app *App) getRecords(writer http.ResponseWriter, request *http.Request) {
 }
 
 func (app *App) createRecord(writer http.ResponseWriter, request *http.Request) {
-	var requestBody RecordBody
+	var record RecordsRow
+	var requestBody CreateRecordBody
 	if err := json.NewDecoder(request.Body).Decode(&requestBody); err != nil {
 		respondWithJSON(writer, http.StatusBadRequest, responseJson{ "message": err.Error() })
 		return
@@ -228,17 +235,19 @@ func (app *App) createRecord(writer http.ResponseWriter, request *http.Request) 
 		return
 	}
 
-	_, err := app.DB.Exec("INSERT INTO records (text) VALUES ($1)", requestBody.Text)
+	err := app.DB.QueryRow("INSERT INTO records (text) VALUES ($1) RETURNING *", requestBody.Text).Scan(&record.Id, &record.Text, &record.CreatedAt, &record.UpdatedAt, &record.Completed)
+
 	if err != nil {
 		respondWithJSON(writer, http.StatusInternalServerError, responseJson{ "error": err.Error() })
 		return
 	}
 
-	respondWithJSON(writer, http.StatusOK, map[string]string{ "message": "Record successfully added." })
+	respondWithJSON(writer, http.StatusCreated, record)
 }
 
 func (app *App) updateRecord(writer http.ResponseWriter, request *http.Request) {
-	var requestBody RecordBody
+	var record RecordsRow
+	var requestBody UpdateRecordBody
 
 	id, err := strconv.Atoi(mux.Vars(request)["id"])
 	if err != nil {
@@ -252,18 +261,20 @@ func (app *App) updateRecord(writer http.ResponseWriter, request *http.Request) 
 	}
 	defer request.Body.Close()
 
-	if requestBody.Text == "" {
-		respondWithJSON(writer, http.StatusBadRequest, responseJson{ "message": "'text' field is required" })
-		return
+	if (requestBody.Text == "") {
+		err = app.DB.QueryRow("UPDATE records SET completed = $1, updatedat = NOW() WHERE id = $2 RETURNING *", requestBody.Completed, id).
+			Scan(&record.Id, &record.Text, &record.CreatedAt, &record.UpdatedAt, &record.Completed)
+	} else {
+		err = app.DB.QueryRow("UPDATE records SET text = $1, completed = $2, updatedat = NOW() WHERE id = $3 RETURNING *", requestBody.Text, requestBody.Completed, id).
+			Scan(&record.Id, &record.Text, &record.CreatedAt, &record.UpdatedAt, &record.Completed)
 	}
 
-	_, err = app.DB.Exec("UPDATE records SET text = $1, updatedat = NOW() WHERE id = $2", requestBody.Text, id)
 	if err != nil {
 		respondWithJSON(writer, http.StatusInternalServerError, responseJson{ "message": err.Error() })
 		return
 	}
 
-	respondWithJSON(writer, http.StatusOK, responseJson{ "message": "Record successfully updated." })
+	respondWithJSON(writer, http.StatusOK, record)
 }
 
 func (app *App) getRecord(writer http.ResponseWriter, request * http.Request) {
@@ -283,7 +294,7 @@ func (app *App) getRecord(writer http.ResponseWriter, request * http.Request) {
 	defer rows.Close()
 
 	if rows.Next() {
-		if err := rows.Scan(&record.Id, &record.Text, &record.CreatedAt, &record.UpdatedAt); err != nil {
+		if err := rows.Scan(&record.Id, &record.Text, &record.CreatedAt, &record.UpdatedAt, &record.Completed); err != nil {
 			respondWithJSON(writer, http.StatusInternalServerError, responseJson{ "message": err.Error() })
 			return
 		}
@@ -308,18 +319,13 @@ func (app *App) deleteRecord(writer http.ResponseWriter, request *http.Request) 
 		return
 	}
 
-	rowsAffected, err := result.RowsAffected()
+	_, err = result.RowsAffected()
 	if err != nil {
 		respondWithJSON(writer, http.StatusInternalServerError, responseJson{ "message": err.Error() })
 		return
 	}
 
-	if rowsAffected == 0 {
-		respondWithJSON(writer, http.StatusBadRequest, responseJson{ "message": fmt.Sprintf("record with id %d does not exist!", id) })
-		return
-	}
-
-	respondWithJSON(writer, http.StatusOK, responseJson{ "message": "record deleted successfully." })
+	respondWithJSON(writer, http.StatusNoContent, nil)
 }
 
 func generateJWT() (string, error) {
