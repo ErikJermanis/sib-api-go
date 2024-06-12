@@ -197,7 +197,7 @@ func (app *App) isAuthenticated(writer http.ResponseWriter, request *http.Reques
 func (app *App) getRecords(writer http.ResponseWriter, request *http.Request) {
 	var records []RecordsRow
 
-	rows, err := app.DB.Query("SELECT * FROM records")
+	rows, err := app.DB.Query("SELECT * FROM records ORDER BY createdat DESC")
 	if err != nil {
 		respondWithJSON(writer, http.StatusInternalServerError, responseJson{ "message": err.Error() })
 		return
